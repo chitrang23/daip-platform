@@ -1,116 +1,135 @@
 const axios = require('axios');
-require('dotenv').config(); // Load the hidden environment file
+require('dotenv').config();
 
-// 💡 CONFIGURATION PANEL (Now perfectly safe for GitHub!)
-const GITHUB_TOKEN = process.env.GITHUB_TOKEN; 
-const REPO_OWNER = "chitrang23";                     // <-- Target profile username
+// Define execution tracking scope
+const targetUser = "chitrang23";                     
+const gitPass = process.env.GITHUB_TOKEN; 
 
-async function scanAllRepositories() {
-  console.log(`\n🚀 Starting Bulk Profile Audit for User: [${REPO_OWNER}]`);
-  console.log("📡 Fetching full repository index from GitHub...");
-  console.log("-------------------------------------------------------\n");
+async function runLifetimeContributionAudit() {
+  console.log(`\n🚀 Starting Total Lifetime Contribution Audit for User: [${targetUser}]`);
+  console.log("📡 Aggregating full collaborative histories across environments...");
+  console.log("-------------------------------------------------------------------\n");
   
   try {
-    const headers = { 'Authorization': `token ${GITHUB_TOKEN}` };
+    // Base configuration headers to maintain a stable handshake with the REST gateway
+    const apiConfig = { 
+      headers: {
+        'Authorization': `Bearer ${gitPass}`,
+        'Accept': 'application/vnd.github.v3+json',
+        'User-Agent': 'DAIP-Lifetime-Agent'
+      }
+    };
     
-    // 1. Fetch ALL public repositories for this user
-    const reposUrl = `https://api.github.com/users/${REPO_OWNER}/repos?per_page=100`;
-    const reposResponse = await axios.get(reposUrl, { headers });
+    // Step 1: Map all associated repositories (owned, shared, and org-affiliated)
+    const discoveryEndpoint = `https://api.github.com/user/repos?per_page=100&affiliation=owner,collaborator,organization_member&sort=updated`;
+    const discoveryResponse = await axios.get(discoveryEndpoint, apiConfig);
+    const scannedItems = discoveryResponse.data;
     
-    const repoList = reposResponse.data;
-    console.log(`✅ Found ${repoList.length} public repositories to audit.\n`);
+    console.log(`✅ Indexed ${scannedItems.length} spaces. Calculating total contributions...\n`);
 
-    // 2. Loop through every single repository found
-    for (let i = 0; i < repoList.length; i++) {
-      const repoName = repoList[i].name;
+    for (let idx = 0; idx < scannedItems.length; idx++) {
+      const repoItem = scannedItems[idx];
+      const repoName = repoItem.name;
+      const creatorLogin = repoItem.owner.login;
+      const unifiedPath = `${creatorLogin}/${repoName}`;
 
       try {
-        // Fetch recent commits for this specific repo
-        const commitUrl = `https://api.github.com/repos/${REPO_OWNER}/${repoName}/commits`;
-        const commitsResponse = await axios.get(commitUrl, { headers });
+        // Step 2: Query historical commits targeted explicitly to our author token
+        const commitHistoryPath = `https://api.github.com/repos/${creatorLogin}/${repoName}/commits?author=${targetUser}&per_page=50`;
+        const historyResponse = await axios.get(commitHistoryPath, apiConfig);
+        const logHistory = historyResponse.data || [];
 
-        if (commitsResponse.data.length === 0) {
+        // Catch inactive project stubs instantly
+        if (logHistory.length === 0) {
           console.log(`┌────────────────────────────────────────────────────────┐`);
-          console.log(`│ 🔍  DAIP PORTFOLIO INTELLIGENCE AUDIT   [${String(i + 1).padStart(2, '0')}/${String(repoList.length).padStart(2, '0')}]     │`);
+          console.log(`│ 🔍  DAIP LIFETIME CONTRIBUTION METRICS  [${String(idx + 1).padStart(2, '0')}/${String(scannedItems.length).padStart(2, '0')}]     │`);
           console.log(`├────────────────────────────────────────────────────────┤`);
-          console.log(`│ 📌 Repository Name:  ${repoName.toUpperCase().padEnd(33)} │`);
-          console.log(`│ ℹ️ Status:           EMPTY REPOSITORY (NO COMMITS)     │`);
+          console.log(`│ 📌 Scope Path:   ${unifiedPath.toUpperCase().padEnd(37)} │`);
+          console.log(`│ ℹ️  Contributions: 0 commits found (Inactive Collaborator) │`);
           console.log(`└────────────────────────────────────────────────────────┘\n`);
           continue;
         }
 
-        const latestCommitSha = commitsResponse.data[0].sha;
-        const detailUrl = `${commitUrl}/${latestCommitSha}`;
-        const detailResponse = await axios.get(detailUrl, { headers });
+        let deltaCodeBuffer = [];
+        let trackedCommitMessages = [];
 
-        // Extract raw code lines
-        let rawAddedLines = [];
-        if (detailResponse.data.files) {
-          detailResponse.data.files.forEach(file => {
-            if (file.patch) {
-              const lines = file.patch.split('\n');
-              lines.forEach(line => {
-                if (line.startsWith('+') && !line.startsWith('+++')) {
-                  rawAddedLines.push(line.substring(1).trim());
+        // Step 3: Dig into each individual save point to pull patch deltas
+        for (const singleCommit of logHistory) {
+          const detailEndpoint = `https://api.github.com/repos/${creatorLogin}/${repoName}/commits/${singleCommit.sha}`;
+          const detailedFetch = await axios.get(detailEndpoint, apiConfig);
+          
+          if (detailedFetch.data.commit?.message) {
+            trackedCommitMessages.push(detailedFetch.data.commit.message.split('\n')[0]);
+          }
+
+          const modifiedFiles = detailedFetch.data.files || [];
+          for (const diffFile of modifiedFiles) {
+            if (diffFile.patch) {
+              const brokenPatchLines = diffFile.patch.split('\n');
+              
+              for (const codeRow of brokenPatchLines) {
+                // Ensure we only collect additions, ignoring meta tracking boundaries
+                if (codeRow.startsWith('+') && !codeRow.startsWith('+++')) {
+                  deltaCodeBuffer.push(codeRow.substring(1).trim());
                 }
-              });
+              }
             }
-          });
+          }
         }
 
-        // Fallback placeholder if the commit didn't change code text (e.g. renaming a file)
-        if (rawAddedLines.length === 0) {
-          rawAddedLines = ["// Baseline operational frame initialization"];
+        // Operational backup buffer in case the history consists purely of file updates or deletes
+        if (deltaCodeBuffer.length === 0) {
+          deltaCodeBuffer = ["// Structural alignment tracking sync"];
         }
 
-        // 3. Pipe to Python AI Engine
-        const targetPayload = {
-          commit_id: latestCommitSha.substring(0, 10),
-          message: detailResponse.data.commit.message || "Regular update",
-          added_lines: rawAddedLines.slice(0, 30) // Test sample buffer
+        // Step 4: Bundle the full history and stream to our analytical microservice
+        const mlPayloadFrame = {
+          commit_id: logHistory[0].sha.substring(0, 10),
+          message: `Aggregated audit of ${logHistory.length} contributions`,
+          added_lines: deltaCodeBuffer.slice(0, 50) 
         };
 
-        const aiResponse = await axios.post('http://localhost:8000/api/v1/analyze', targetPayload);
-        const mlMetrics = aiResponse.data;
+        const postToAnalytics = await axios.post('http://localhost:8000/api/v1/analyze', mlPayloadFrame);
+        const payloadMetrics = postToAnalytics.data;
 
-        // 4. Score calculation logic
-        const avgAI = mlMetrics.ai_detection_results[0]?.composite || 0.12;
-        const avgCopy = mlMetrics.similarity_results[0]?.score || 0.0;
-        const authenticityScore = Math.min(100, Math.max(0, 100 - (avgAI * 100) - (avgCopy * 100)));
+        const evaluatedAIRisk = payloadMetrics.ai_detection_results[0]?.composite || 0.15;
+        const mappedPlagScore = payloadMetrics.similarity_results[0]?.score || 0.0;
+        
+        // Final authenticity grade standardization calculation
+        const compiledGrade = Math.min(100, Math.max(0, 100 - (evaluatedAIRisk * 100) - (mappedPlagScore * 100)));
 
-        // Clean up message layout spacing
-        const safeMessage = targetPayload.message.replace(/\n/g, ' ').substring(0, 30);
-
-        // 💎 PREMIUM VISUAL LOGGING ENGINE OUTPUT
+        // Output formatting visualization engine
         console.log(`┌────────────────────────────────────────────────────────┐`);
-        console.log(`│ 🔍  DAIP PORTFOLIO INTELLIGENCE AUDIT   [${String(i + 1).padStart(2, '0')}/${String(repoList.length).padStart(2, '0')}]     │`);
+        console.log(`│ 🔍  DAIP LIFETIME CONTRIBUTION METRICS  [${String(idx + 1).padStart(2, '0')}/${String(scannedItems.length).padStart(2, '0')}]     │`);
         console.log(`├────────────────────────────────────────────────────────┤`);
-        console.log(`│ 📌 Repository Name:  ${repoName.toUpperCase().padEnd(33)} │`);
-        console.log(`│ 📝 Latest Save:     "${safeMessage.padEnd(30)}" │`);
+        console.log(`│ 📌 Scope Path:   ${unifiedPath.toUpperCase().padEnd(37)} │`);
+        console.log(`│ 📊 Total Volume: ${String(logHistory.length).padStart(2, '0')} Commits | ${String(deltaCodeBuffer.length).padStart(4, '0')} Custom Lines Added │`);
         console.log(`├────────────────────────────────────────────────────────┤`);
-        console.log(`│ 🛡️  Authenticity Score:      [ ${authenticityScore.toFixed(1).padStart(5, ' ')} / 100 ]        │`);
+        console.log(`│ 🛡️  Rolling Authenticity Score: [ ${compiledGrade.toFixed(1).padStart(5, ' ')} / 100 ]     │`);
         console.log(`│                                                        │`);
-        console.log(`│ 🤖 AI Signature Risk:   ${(avgAI * 100).toFixed(1).padStart(5, ' ')}% match -> ${avgAI > 0.5 ? '🚨 HIGH RISK ' : '✅ LOW RISK  '} │`);
-        console.log(`│ 📝 Plagiarism Mirror:                 -> ${avgCopy > 0.5 ? '🚨 FLAGGED   ' : '✅ CLEAN     '} │`);
+        console.log(`│ 🤖 Overall AI Risk:    ${(evaluatedAIRisk * 100).toFixed(1).padStart(5, ' ')}% match -> ${evaluatedAIRisk > 0.5 ? '🚨 HIGH RISK ' : '✅ LOW RISK  '} │`);
+        console.log(`│ 📝 Plagiarism Status:                 -> ${mappedPlagScore > 0.5 ? '🚨 FLAGGED   ' : '✅ CLEAN     '} │`);
         console.log(`└────────────────────────────────────────────────────────┘\n`);
 
-      } catch (repoError) {
+      } catch (innerRepoException) {
+        const structuralAlert = innerRepoException.response ? `Status ${innerRepoException.response.status}` : innerRepoException.message;
+        
         console.log(`┌────────────────────────────────────────────────────────┐`);
-        console.log(`│ ⚠️  DAIP AUDIT PIPELINE ERROR            [${String(i + 1).padStart(2, '0')}/${String(repoList.length).padStart(2, '0')}]     │`);
+        console.log(`│ ⚠️  DAIP AUDIT PIPELINE ERROR            [${String(idx + 1).padStart(2, '0')}/${String(scannedItems.length).padStart(2, '0')}]     │`);
         console.log(`├────────────────────────────────────────────────────────┤`);
-        console.log(`│ 📌 Repository Name:  ${repoName.toUpperCase().padEnd(33)} │`);
-        console.log(`│ ❌ System Warning:   Code 409 / Empty Branch Frame     │`);
+        console.log(`│ 📌 Scope Path:   ${unifiedPath.toUpperCase().padEnd(37)} │`);
+        console.log(`│ ❌ System Alert:  ${structuralAlert.padEnd(36)} │`);
         console.log(`└────────────────────────────────────────────────────────┘\n`);
       }
     }
 
     console.log("=======================================================");
-    console.log("🎉 SUCCESS: BULK PROFILE AUDIT COMPLETE!");
+    console.log("🎉 SUCCESS: LIFETIME AGGREGATE PROFILE COMPLETE!");
     console.log("=======================================================");
 
-  } catch (error) {
-    console.error("❌ Bulk Scan Failed:", error.message);
+  } catch (globalFaultException) {
+    console.error("❌ Fatal Tracking Interruption:", globalFaultException.message);
   }
 }
 
-scanAllRepositories();
+runLifetimeContributionAudit();
